@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Initialization
+        run: terraform init -backend=false
+
+      - name: Terraform Check
+        run: terraform fmt -check -diff -recursive
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Test
+        run: terraform test
+
+      - name: Trivy Security Scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        env:
+          TRIVY_TF_EXCLUDE_DOWNLOADED_MODULES: "true"
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - name: Version
+        id: tag
+        uses: anothrNick/github-tag-action@4ed44965e0db8dab2b466a16da04aec3cc312fd8
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_BRANCHES: main
+          DEFAULT_BUMP: patch
+          WITH_V: true
+
+      - name: Release
+        if: steps.tag.outputs.new_tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "${{ steps.tag.outputs.new_tag }}" --title "${{ steps.tag.outputs.new_tag }}" --generate-notes
